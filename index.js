@@ -21,7 +21,11 @@ const extractId = (url) => {
 };
 
 // Helper to map SWAPI resource to image path
+// Helper to map SWAPI resource to image path
 const getImagePath = (resource, id) => {
+  // ✨ NUEVA URL: jsDelivr CDN desde GitHub
+  const cdnBase = "https://cdn.jsdelivr.net/gh/tbone849/star-wars-guide@master/build/assets/img";
+  
   const resourceMap = {
     people: "characters",
     planets: "planets",
@@ -30,9 +34,9 @@ const getImagePath = (resource, id) => {
     species: "species",
     films: "films",
   };
-  return `${IMAGE_BASE_URL}/${resourceMap[resource]}/${id}.jpg`;
+  
+  return `${cdnBase}/${resourceMap[resource]}/${id}.jpg`;
 };
-
 // Generic function to fetch and map data
 const fetchData = async (resource, req, res) => {
   try {

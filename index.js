@@ -193,10 +193,31 @@ app.get("/api/films/:id", async (req, res) => {
   }
 });
 
+app.get("/api/species", (req, res) => fetchData("species", req, res));
+app.get("/api/species/:id", async (req, res) => {
+  try {
+    const { id } = req.params;
+    const response = await axios.get(`${SWAPI_BASE_URL}/species/${id}/`);
+    const data = response.data;
+    res.json({
+      ...data,
+      id,
+      image: getImagePath("species", id),
+    });
+  } catch (error) {
+    console.error("Error fetching species:", error.message);
+    res
+      .status(error.response?.status || 500)
+      .json({ error: "Failed to fetch species" });
+  }
+});
+
 // Health check
 app.get("/health", (req, res) => {
   res.json({ status: "OK", message: "Star Wars API is running" });
 });
+
+
 
 // Start server
 app.listen(PORT, () => {

@@ -23,42 +23,47 @@ const RESOURCE_MAP = {
 };
 
 // ─── FILMS EXTRA (episodios 7, 8, 9 — no están en ninguna SWAPI pública) ─────
+// Posters Ep 7-9: el CDN tbone849 no los tiene, usamos Wikimedia (dominio público)
+const POSTER_EP7 = "https://upload.wikimedia.org/wikipedia/en/a/a2/Star_Wars_The_Force_Awakens_Theatrical_Poster.jpg";
+const POSTER_EP8 = "https://upload.wikimedia.org/wikipedia/en/7/7f/Star_Wars_The_Last_Jedi.jpg";
+const POSTER_EP9 = "https://upload.wikimedia.org/wikipedia/en/a/af/Star_Wars_The_Rise_of_Skywalker_poster.jpg";
+
 const EXTRA_FILMS = [
   {
     title: "The Force Awakens",
     episode_id: 7,
-    opening_crawl: "Luke Skywalker has vanished...",
+    opening_crawl: "Luke Skywalker has vanished. In his absence, the sinister FIRST ORDER has risen from the ashes of the Empire and will not rest until Skywalker, the last Jedi, has been destroyed.",
     director: "J.J. Abrams",
     producer: "Kathleen Kennedy, J.J. Abrams, Bryan Burk",
     release_date: "2015-12-18",
     characters: [], planets: [], starships: [], vehicles: [], species: [],
     url: "https://swapi.info/api/films/7/",
     id: "7",
-    image: `${CDN_BASE}/films/7.jpg`,
+    image: POSTER_EP7,
   },
   {
     title: "The Last Jedi",
     episode_id: 8,
-    opening_crawl: "The FIRST ORDER reigns...",
+    opening_crawl: "The FIRST ORDER reigns. Having decimated the peaceful Republic, Supreme Leader Snoke now deploys his merciless legions to seize military control of the galaxy.",
     director: "Rian Johnson",
     producer: "Kathleen Kennedy, Ram Bergman",
     release_date: "2017-12-15",
     characters: [], planets: [], starships: [], vehicles: [], species: [],
     url: "https://swapi.info/api/films/8/",
     id: "8",
-    image: `${CDN_BASE}/films/8.jpg`,
+    image: POSTER_EP8,
   },
   {
     title: "The Rise of Skywalker",
     episode_id: 9,
-    opening_crawl: "The dead speak!...",
+    opening_crawl: "The dead speak! The galaxy has heard a mysterious broadcast, a threat of REVENGE in the sinister voice of the late Emperor Palpatine.",
     director: "J.J. Abrams",
     producer: "Kathleen Kennedy, J.J. Abrams, Michelle Rejwan",
     release_date: "2019-12-20",
     characters: [], planets: [], starships: [], vehicles: [], species: [],
     url: "https://swapi.info/api/films/9/",
     id: "9",
-    image: `${CDN_BASE}/films/9.jpg`,
+    image: POSTER_EP9,
   },
 ];
 

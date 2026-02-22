@@ -6,231 +6,316 @@ require("dotenv").config();
 const app = express();
 const PORT = process.env.PORT || 3002;
 
-// Middleware
 app.use(cors());
 app.use(express.json());
 
-// Base URLs
-const SWAPI_BASE_URL = "https://swapi.info/api"; // Using the source requested by the user
-const IMAGE_BASE_URL = "https://starwars-visualguide.com/assets/img";
+// ─── CONFIG ───────────────────────────────────────────────────────────────────
+const SWAPI_BASE_URL = "https://swapi.info/api";
+const CDN_BASE = "https://cdn.jsdelivr.net/gh/tbone849/star-wars-guide@master/build/assets/img";
 
-// Helper to extract ID from SWAPI URL
+const RESOURCE_MAP = {
+  people: "characters",
+  planets: "planets",
+  starships: "starships",
+  vehicles: "vehicles",
+  species: "species",
+  films: "films",
+};
+
+// ─── FILMS EXTRA (episodios 7, 8, 9 — no están en ninguna SWAPI pública) ─────
+const EXTRA_FILMS = [
+  {
+    title: "The Force Awakens",
+    episode_id: 7,
+    opening_crawl: "Luke Skywalker has vanished...",
+    director: "J.J. Abrams",
+    producer: "Kathleen Kennedy, J.J. Abrams, Bryan Burk",
+    release_date: "2015-12-18",
+    characters: [], planets: [], starships: [], vehicles: [], species: [],
+    url: "https://swapi.info/api/films/7/",
+    id: "7",
+    image: `${CDN_BASE}/films/7.jpg`,
+  },
+  {
+    title: "The Last Jedi",
+    episode_id: 8,
+    opening_crawl: "The FIRST ORDER reigns...",
+    director: "Rian Johnson",
+    producer: "Kathleen Kennedy, Ram Bergman",
+    release_date: "2017-12-15",
+    characters: [], planets: [], starships: [], vehicles: [], species: [],
+    url: "https://swapi.info/api/films/8/",
+    id: "8",
+    image: `${CDN_BASE}/films/8.jpg`,
+  },
+  {
+    title: "The Rise of Skywalker",
+    episode_id: 9,
+    opening_crawl: "The dead speak!...",
+    director: "J.J. Abrams",
+    producer: "Kathleen Kennedy, J.J. Abrams, Michelle Rejwan",
+    release_date: "2019-12-20",
+    characters: [], planets: [], starships: [], vehicles: [], species: [],
+    url: "https://swapi.info/api/films/9/",
+    id: "9",
+    image: `${CDN_BASE}/films/9.jpg`,
+  },
+];
+
+// ─── CACHE en memoria ─────────────────────────────────────────────────────────
+const cache = {
+  people: [],
+  planets: [],
+  starships: [],
+  vehicles: [],
+  species: [],
+  films: [],
+  loaded: {},   // { people: true/false, ... }
+  loading: {},  // evita fetches duplicados
+};
+
+// ─── HELPERS ──────────────────────────────────────────────────────────────────
 const extractId = (url) => {
-  const parts = url.split("/").filter(Boolean);
+  const parts = (url || "").split("/").filter(Boolean);
   return parts[parts.length - 1];
 };
 
-// Helper to map SWAPI resource to image path
-// Helper to map SWAPI resource to image path
-const getImagePath = (resource, id) => {
-  // ✨ NUEVA URL: jsDelivr CDN desde GitHub
-  const cdnBase = "https://cdn.jsdelivr.net/gh/tbone849/star-wars-guide@master/build/assets/img";
-  
-  const resourceMap = {
-    people: "characters",
-    planets: "planets",
-    starships: "starships",
-    vehicles: "vehicles",
-    species: "species",
-    films: "films",
-  };
-  
-  return `${cdnBase}/${resourceMap[resource]}/${id}.jpg`;
+const getImagePath = (resource, id) =>
+  `${CDN_BASE}/${RESOURCE_MAP[resource]}/${id}.jpg`;
+
+const enrichItem = (resource, item) => {
+  const id = item.id || extractId(item.url);
+  return { ...item, id, image: item.image || getImagePath(resource, id) };
 };
-// Generic function to fetch and map data
-const fetchData = async (resource, req, res) => {
+
+// ─── FETCH Y CACHEO de un recurso completo ────────────────────────────────────
+async function loadResource(resource) {
+  if (cache.loaded[resource]) return;          // ya tenemos todo
+  if (cache.loading[resource]) {               // espera si ya está en curso
+    await new Promise((r) => setTimeout(r, 200));
+    return loadResource(resource);
+  }
+
+  cache.loading[resource] = true;
+  console.log(`⬇️  Fetching ALL ${resource} from swapi.info...`);
+
   try {
-    const { page, search } = req.query;
-    let url = `${SWAPI_BASE_URL}/${resource}/`;
+    const response = await axios.get(`${SWAPI_BASE_URL}/${resource}/`, {
+      timeout: 15000,
+    });
 
-    const response = await axios.get(url);
-    let data = response.data;
+    let results = Array.isArray(response.data)
+      ? response.data
+      : response.data.results || [];
 
-    // Handle array response from swapi.info
-    let results = Array.isArray(data) ? data : data.results || [];
+    results = results.map((item) => enrichItem(resource, item));
 
-    // Implement search/filtering
-    if (search) {
-      const searchTerm = search.toLowerCase();
-      results = results.filter(
-        (item) =>
-          (item.name && item.name.toLowerCase().includes(searchTerm)) ||
-          (item.title && item.title.toLowerCase().includes(searchTerm)),
-      );
+    // Agregar los films extra si corresponde
+    if (resource === "films") {
+      const existingIds = new Set(results.map((f) => f.id));
+      EXTRA_FILMS.forEach((f) => {
+        if (!existingIds.has(f.id)) results.push(f);
+      });
+      results.sort((a, b) => a.episode_id - b.episode_id);
     }
 
-    const totalCount = results.length;
-    const itemsPerPage = 10;
-    const currentPage = parseInt(page) || 1;
+    cache[resource] = results;
+    cache.loaded[resource] = true;
+    console.log(`✅ ${resource}: ${results.length} items cacheados`);
+  } catch (err) {
+    console.error(`❌ Error cargando ${resource}:`, err.message);
+  } finally {
+    cache.loading[resource] = false;
+  }
+}
 
-    // Implement pagination
-    const startIndex = (currentPage - 1) * itemsPerPage;
-    const endIndex = startIndex + itemsPerPage;
-    const paginatedResults = results.slice(startIndex, endIndex);
+// ─── PRECARGA al arrancar (todo en paralelo) ──────────────────────────────────
+async function preloadAll() {
+  console.log("🚀 Precargando toda la galaxia...");
+  await Promise.all(
+    Object.keys(RESOURCE_MAP).map((r) => loadResource(r))
+  );
+  console.log("🌟 Cache lista. El universo Star Wars está disponible.");
+}
 
-    // Enrich with IDs and images
-    const enrichedResults = paginatedResults.map((item) => {
-      const id = extractId(item.url);
-      return {
-        ...item,
-        id,
-        image: getImagePath(resource, id),
-      };
-    });
+// ─── FILTER + PAGINATE desde cache ───────────────────────────────────────────
+function fromCache(resource, { search, page, limit = 20 }) {
+  let results = [...cache[resource]];
 
-    // Construct response compatible with original SWAPI
-    const baseUrl = `${req.protocol}://${req.get("host")}${req.path}`;
-    const nextLine =
-      startIndex + itemsPerPage < totalCount
-        ? `${baseUrl}?page=${currentPage + 1}${search ? `&search=${search}` : ""}`
-        : null;
-    const prevLine =
-      currentPage > 1
-        ? `${baseUrl}?page=${currentPage - 1}${search ? `&search=${search}` : ""}`
-        : null;
+  if (search) {
+    const term = search.toLowerCase();
+    results = results.filter(
+      (item) =>
+        (item.name && item.name.toLowerCase().includes(term)) ||
+        (item.title && item.title.toLowerCase().includes(term))
+    );
+  }
+
+  const total = results.length;
+  const currentPage = parseInt(page) || 1;
+  const itemsPerPage = parseInt(limit) || 20;
+  const start = (currentPage - 1) * itemsPerPage;
+  const paginated = results.slice(start, start + itemsPerPage);
+
+  return { total, currentPage, itemsPerPage, paginated, all: results };
+}
+
+// ─── RUTA GENÉRICA (respuesta inmediata desde cache) ─────────────────────────
+function makeRoute(resource) {
+  // Lista paginada
+  app.get(`/api/${resource}`, async (req, res) => {
+    // Si aún no cargó, espera (máx 10s)
+    if (!cache.loaded[resource]) {
+      loadResource(resource); // dispara sin await
+      let waited = 0;
+      while (!cache.loaded[resource] && waited < 10000) {
+        await new Promise((r) => setTimeout(r, 100));
+        waited += 100;
+      }
+    }
+
+    const { total, currentPage, itemsPerPage, paginated } = fromCache(
+      resource, req.query
+    );
+    const base = `${req.protocol}://${req.get("host")}${req.path}`;
+    const qs = req.query.search ? `&search=${req.query.search}` : "";
 
     res.json({
-      count: totalCount,
-      next: nextLine,
-      previous: prevLine,
-      results: enrichedResults,
+      count: total,
+      next:
+        currentPage * itemsPerPage < total
+          ? `${base}?page=${currentPage + 1}${qs}`
+          : null,
+      previous: currentPage > 1 ? `${base}?page=${currentPage - 1}${qs}` : null,
+      results: paginated,
     });
-  } catch (error) {
-    console.error(`Error fetching ${resource}:`, error.message);
-    res.status(500).json({ error: `Failed to fetch ${resource}` });
-  }
-};
+  });
 
-// Routes
-app.get("/api/people", (req, res) => fetchData("people", req, res));
-app.get("/api/people/:id", async (req, res) => {
-  try {
-    const { id } = req.params;
-    const response = await axios.get(`${SWAPI_BASE_URL}/people/${id}/`);
-    const data = response.data;
-    res.json({
-      ...data,
-      id,
-      image: getImagePath("people", id),
-    });
-  } catch (error) {
-    console.error("Error fetching person:", error.message);
-    res
-      .status(error.response?.status || 500)
-      .json({ error: "Failed to fetch person" });
-  }
+  // Detalle por ID
+  app.get(`/api/${resource}/:id`, async (req, res) => {
+    if (!cache.loaded[resource]) await loadResource(resource);
+
+    const item = cache[resource].find((i) => i.id === req.params.id);
+    if (!item) return res.status(404).json({ error: "Not found" });
+    res.json(item);
+  });
+
+  // ── SSE STREAM: primeros 10 al instante, resto después ────────────────────
+  app.get(`/api/${resource}/stream`, async (req, res) => {
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+    res.flushHeaders();
+
+    const send = (event, data) =>
+      res.write(`event: ${event}\ndata: ${JSON.stringify(data)}\n\n`);
+
+    // Si no hay cache, empieza a cargar
+    const alreadyLoaded = cache.loaded[resource];
+    if (!alreadyLoaded) loadResource(resource);
+
+    // Espera a tener al menos algo en cache
+    let waited = 0;
+    while (cache[resource].length === 0 && waited < 10000) {
+      await new Promise((r) => setTimeout(r, 100));
+      waited += 100;
+    }
+
+    const { search } = req.query;
+    const getFiltered = () => {
+      let r = [...cache[resource]];
+      if (search) {
+        const term = search.toLowerCase();
+        r = r.filter(
+          (i) =>
+            (i.name && i.name.toLowerCase().includes(term)) ||
+            (i.title && i.title.toLowerCase().includes(term))
+        );
+      }
+      return r;
+    };
+
+    // Manda los primeros 10 inmediatamente
+    const firstBatch = getFiltered().slice(0, 10);
+    send("batch", { items: firstBatch, offset: 0, done: false });
+
+    // Si ya estaba todo cargado, manda el resto de una
+    if (alreadyLoaded) {
+      const rest = getFiltered().slice(10);
+      if (rest.length > 0) send("batch", { items: rest, offset: 10, done: false });
+      send("done", { total: getFiltered().length });
+      return res.end();
+    }
+
+    // Si estaba cargando, espera y manda el resto cuando termine
+    let sent = firstBatch.length;
+    const interval = setInterval(() => {
+      const all = getFiltered();
+      if (all.length > sent) {
+        const newItems = all.slice(sent);
+        send("batch", { items: newItems, offset: sent, done: false });
+        sent = all.length;
+      }
+      if (cache.loaded[resource]) {
+        send("done", { total: all.length });
+        clearInterval(interval);
+        res.end();
+      }
+    }, 500);
+
+    req.on("close", () => clearInterval(interval));
+  });
+}
+
+// ─── REGISTRAR RUTAS ──────────────────────────────────────────────────────────
+Object.keys(RESOURCE_MAP).forEach(makeRoute);
+
+// ─── RUTA: TODO el universo de una vez ───────────────────────────────────────
+app.get("/api/universe", async (req, res) => {
+  const resources = Object.keys(RESOURCE_MAP);
+  const notLoaded = resources.filter((r) => !cache.loaded[r]);
+  if (notLoaded.length > 0) await Promise.all(notLoaded.map(loadResource));
+
+  res.json({
+    films:     { count: cache.films.length,     results: cache.films },
+    people:    { count: cache.people.length,    results: cache.people },
+    planets:   { count: cache.planets.length,   results: cache.planets },
+    starships: { count: cache.starships.length, results: cache.starships },
+    vehicles:  { count: cache.vehicles.length,  results: cache.vehicles },
+    species:   { count: cache.species.length,   results: cache.species },
+  });
 });
 
-app.get("/api/planets", (req, res) => fetchData("planets", req, res));
-app.get("/api/planets/:id", async (req, res) => {
-  try {
-    const { id } = req.params;
-    const response = await axios.get(`${SWAPI_BASE_URL}/planets/${id}/`);
-    const data = response.data;
-    res.json({
-      ...data,
-      id,
-      image: getImagePath("planets", id),
-    });
-  } catch (error) {
-    console.error("Error fetching planet:", error.message);
-    res
-      .status(error.response?.status || 500)
-      .json({ error: "Failed to fetch planet" });
-  }
+// ─── ESTADO DEL CACHE ─────────────────────────────────────────────────────────
+app.get("/api/cache/status", (req, res) => {
+  res.json(
+    Object.keys(RESOURCE_MAP).reduce((acc, r) => {
+      acc[r] = { loaded: !!cache.loaded[r], count: cache[r].length };
+      return acc;
+    }, {})
+  );
 });
 
-app.get("/api/starships", (req, res) => fetchData("starships", req, res));
-app.get("/api/starships/:id", async (req, res) => {
-  try {
-    const { id } = req.params;
-    const response = await axios.get(`${SWAPI_BASE_URL}/starships/${id}/`);
-    const data = response.data;
-    res.json({
-      ...data,
-      id,
-      image: getImagePath("starships", id),
-    });
-  } catch (error) {
-    console.error("Error fetching starship:", error.message);
-    res
-      .status(error.response?.status || 500)
-      .json({ error: "Failed to fetch starship" });
-  }
-});
-
-app.get("/api/vehicles", (req, res) => fetchData("vehicles", req, res));
-app.get("/api/vehicles/:id", async (req, res) => {
-  try {
-    const { id } = req.params;
-    const response = await axios.get(`${SWAPI_BASE_URL}/vehicles/${id}/`);
-    const data = response.data;
-    res.json({
-      ...data,
-      id,
-      image: getImagePath("vehicles", id),
-    });
-  } catch (error) {
-    console.error("Error fetching vehicle:", error.message);
-    res
-      .status(error.response?.status || 500)
-      .json({ error: "Failed to fetch vehicle" });
-  }
-});
-
-app.get("/api/films", (req, res) => fetchData("films", req, res));
-app.get("/api/films/:id", async (req, res) => {
-  try {
-    const { id } = req.params;
-    const response = await axios.get(`${SWAPI_BASE_URL}/films/${id}/`);
-    const data = response.data;
-    res.json({
-      ...data,
-      id,
-      image: getImagePath("films", id),
-    });
-  } catch (error) {
-    console.error("Error fetching film:", error.message);
-    res
-      .status(error.response?.status || 500)
-      .json({ error: "Failed to fetch film" });
-  }
-});
-
-app.get("/api/species", (req, res) => fetchData("species", req, res));
-app.get("/api/species/:id", async (req, res) => {
-  try {
-    const { id } = req.params;
-    const response = await axios.get(`${SWAPI_BASE_URL}/species/${id}/`);
-    const data = response.data;
-    res.json({
-      ...data,
-      id,
-      image: getImagePath("species", id),
-    });
-  } catch (error) {
-    console.error("Error fetching species:", error.message);
-    res
-      .status(error.response?.status || 500)
-      .json({ error: "Failed to fetch species" });
-  }
-});
-
-// Health check
+// ─── HEALTH ───────────────────────────────────────────────────────────────────
 app.get("/health", (req, res) => {
-  res.json({ status: "OK", message: "Star Wars API is running" });
+  res.json({ status: "OK", message: "Star Wars API is running 🚀" });
 });
 
+// ─── ARRANQUE ─────────────────────────────────────────────────────────────────
+app.listen(PORT, async () => {
+  console.log(`\n🌌 Star Wars API → http://localhost:${PORT}`);
+  console.log(`\n📡 Endpoints:`);
+  console.log(`   GET /api/films              → 9 películas (cache)`);
+  console.log(`   GET /api/people             → todos los personajes`);
+  console.log(`   GET /api/planets            → todos los planetas`);
+  console.log(`   GET /api/starships          → todas las naves`);
+  console.log(`   GET /api/vehicles           → todos los vehículos`);
+  console.log(`   GET /api/species            → todas las species`);
+  console.log(`   GET /api/{resource}/stream  → SSE: primeros 10 al instante`);
+  console.log(`   GET /api/universe           → todo el universo de una vez`);
+  console.log(`   GET /api/cache/status       → estado del cache`);
+  console.log(`\n   ?search=yoda  ?page=2  ?limit=10  (en todos los endpoints)\n`);
 
-
-// Start server
-app.listen(PORT, () => {
-  console.log(`🚀 Star Wars API server running on http://localhost:${PORT}`);
-  console.log(`📡 Endpoints available:`);
-  console.log(`   GET /api/people    - All characters`);
-  console.log(`   GET /api/planets   - All planets`);
-  console.log(`   GET /api/starships - All starships`);
-  console.log(`   GET /api/vehicles  - All vehicles`);
-  console.log(`   GET /api/films     - All films`);
-  console.log(`   GET /health        - Health check`);
+  // Precarga en background sin bloquear el servidor
+  preloadAll();
 });
